@@ -752,7 +752,7 @@ return (
         (عدد المواعيد: {confirmedGrouped[key].length})
       </span>
     </h3>
-            {confirmedGrouped[key].map(item=>(
+            {confirmedGrouped[key].map((item: Appointment)=>(
           <div key={item.id} style={{display:"flex",gap:"10px",marginBottom:"6px"}}>
   <div style={{width:"10px",height:"10px",borderRadius:"50%",background:getPriorityColor(item.priority)}}/>
   <div>{formatTimeArabic(item.date)}</div>
@@ -836,7 +836,7 @@ const diffDays = Math.floor(
           تنبيه: الموعد بعد {diffDays} يوم
         </div>
       )}
-            {waitingGrouped[key].map(item=>(
+            {waitingGrouped[key].map((item: Appointment)=>(
        <div key={item.id} style={{display:"flex",gap:"10px",marginBottom:"6px"}}>
   <div style={{width:"10px",height:"10px",borderRadius:"50%",background:getPriorityColor(item.priority)}}/>
   <div>{formatTimeArabic(item.date)}</div>
