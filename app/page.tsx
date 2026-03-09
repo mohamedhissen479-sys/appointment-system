@@ -132,6 +132,8 @@ if (!title) {
   return;
 }
 
+  const nowTime = new Date();
+
   // منع وقت قديم في نفس اليوم فقط
   if (
     newDate.toDateString() === nowTime.toDateString() &&
