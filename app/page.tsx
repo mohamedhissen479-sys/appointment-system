@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import Swal from "sweetalert2";
 
 type Appointment = {
   id: number;
@@ -113,8 +114,23 @@ const [showTodayPopup,setShowTodayPopup] = useState(false);
 
   const handleSave = (force = false, updateExisting = false) => {
     const newDate = buildDate();
-    if (!newDate || !title) return;
-      const nowTime = new Date();
+   if (!newDate) {
+  Swal.fire({
+    icon: "warning",
+    title: "تنبيه",
+    text: "يرجى تحديد التاريخ والوقت أولاً"
+  });
+  return;
+}
+
+if (!title) {
+  Swal.fire({
+    icon: "warning",
+    title: "تنبيه",
+    text: "يرجى إدخال اسم الموعد"
+  });
+  return;
+}
 
   // منع وقت قديم في نفس اليوم فقط
   if (

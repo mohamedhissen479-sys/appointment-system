@@ -14,7 +14,8 @@
     "react-clock": "^6.0.0",
     "react-datepicker": "^9.1.0",
     "react-dom": "19.2.3",
-    "react-time-picker": "^8.0.2"
+    "react-time-picker": "^8.0.2",
+    "sweetalert2": "^11.26.22"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
