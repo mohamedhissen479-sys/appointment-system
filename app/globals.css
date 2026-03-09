@@ -24,3 +24,27 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+.custom-swal-popup{
+direction:rtl;
+}
+
+.custom-swal-close{
+position:absolute !important;
+
+left:12px !important;
+right:auto !important;
+
+top:12px !important;
+
+font-size:30px !important;
+font-weight:bold !important;
+
+color:#666 !important;
+
+transition:0.2s;
+}
+
+.custom-swal-close:hover{
+color:#f44336 !important;
+transform:scale(1.2);
+}

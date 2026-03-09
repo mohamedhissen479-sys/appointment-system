@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, Fragment } from "react";
 import Swal from "sweetalert2";
+import { ArrowUpDown, Pencil, Trash2 } from "lucide-react";
 
 type Appointment = {
   id: number;
@@ -180,9 +181,16 @@ if (!title) {
     setTitle("");
   };
 
-  const handleDelete = (id:number) => {
-    setAppointments(prev => prev.filter(a => a.id !== id));
-  };
+ const handleDelete = (id:number) => {
+
+  const confirmDelete = confirm("هل أنت متأكد من حذف هذا الموعد؟");
+
+  if(!confirmDelete) return;
+
+  setAppointments(prev =>
+    prev.filter(a => a.id !== id)
+  );
+};
 const moveToConfirmed = (id:number) => {
   setAppointments(prev =>
     prev.map(a =>
@@ -473,54 +481,7 @@ cursor:"pointer"
         {editingId ? "تحديث" : "إضافة"}
       </button>
 
-{moveDialog && (
-  <div style={{
-    marginTop:"20px",
-    padding:"15px",
-    border:"2px solid orange",
-    borderRadius:"8px",
-    background:"#fff3e0"
-  }}>
-    هل تريد نقل الموعد إلى قائمة الانتظار؟
 
-    <div style={{display:"flex",gap:"10px",marginTop:"10px"}}>
-
-      <button
-        onClick={()=>{
-          moveToWaiting(moveDialog.id);
-          setMoveDialog(null);
-        }}
-        style={{
-          flex:1,
-          padding:"8px",
-          background:"#ff9800",
-          color:"white",
-          border:"none"
-        }}
-      >
-        تحويل بنفس الموعد
-      </button>
-
-     <button
-  onClick={()=>{
-    handleEdit(moveDialog);
-    setStatus("waiting");
-    setMoveDialog(null);
-  }}
-  style={{
-    flex:1,
-    padding:"8px",
-    background:"#2196F3",
-    color:"white",
-    border:"none"
-  }}
->
-  تعديل الموعد
-</button>
-
-    </div>
-  </div>
-)}
 {confirmDialog && (
   <div style={{
     marginTop:"20px",
@@ -630,7 +591,8 @@ boxShadow:"0 0 10px rgba(0,0,0,0.3)"
 <table style={{
 width:"100%",
 borderCollapse:"collapse",
-marginTop:"10px"
+marginTop:"10px",
+tableLayout:"fixed"
 }}>
 
 <thead>
@@ -658,8 +620,28 @@ return a.date.toDateString()===now.toDateString();
 {a.title}
 </td>
 
-<td style={{padding:"6px"}}>
+<td style={{padding:"6px",textAlign:"center"}}>
+
+<div style={{
+display:"flex",
+alignItems:"center",
+justifyContent:"center",
+gap:"6px"
+}}>
+
+<div style={{
+width:"10px",
+height:"10px",
+borderRadius:"50%",
+background:getPriorityColor(a.priority)
+}}></div>
+
+<span>
 {a.priority}
+</span>
+
+</div>
+
 </td>
 
 </tr>
@@ -726,160 +708,291 @@ cursor: rangeOffset >= totalPages-1 ? "not-allowed" : "pointer"
 
 </div>
       <h2>المواعيد المؤكدة</h2>
+      <table style={{
+width:"100%",
+borderCollapse:"collapse",
+marginTop:"15px"
+}}>
+
+<thead>
+<tr style={{
+background:"#4CAF50",
+color:"white"
+}}>
+<th style={{padding:"10px",width:"140px",textAlign:"center"}}>الوقت</th>
+
+<th style={{
+padding:"10px",
+textAlign:"center",
+width:"100%",
+letterSpacing:"2px",
+fontWeight:"bold"
+}}>
+────────────── الموعد ──────────────
+</th>
+
+<th style={{padding:"10px",width:"70px",textAlign:"center"}}>
+الأولوية
+</th>
+
+<th style={{padding:"10px",width:"120px",textAlign:"left"}}>
+الإجراءات
+</th>
+</tr>
+</thead>
+
+<tbody>
+
 {pagedConfirmedKeys.map(key=>{
-  const dayDate = confirmedGrouped[key][0].date;
 
-const today = new Date();
-
-const todayDate = new Date(
-  today.getFullYear(),
-  today.getMonth(),
-  today.getDate()
-);
-
-const targetDate = new Date(
-  dayDate.getFullYear(),
-  dayDate.getMonth(),
-  dayDate.getDate()
-);
-
-const isToday =
-  dayDate.getDate() === new Date().getDate() &&
-  dayDate.getMonth() === new Date().getMonth() &&
-  dayDate.getFullYear() === new Date().getFullYear();
+const dayDate = confirmedGrouped[key][0].date;
 
 return (
-  <div
-    key={key}
-    style={{
-      marginBottom:"20px",
-      background:isToday ? "#e3f2fd" : "transparent",
-      padding:isToday ? "10px" : "0",
-      borderRadius:"8px"
-    }}
-  >
 
-    <h3>
-      {formatFullDateArabic(dayDate)}
+<Fragment key={key}>
+<tr style={{
+background:"#e3f2fd",
+fontWeight:"bold"
+}}>
+<td colSpan={4} style={{padding:"8px"}}>
+{formatFullDateArabic(dayDate)}
+(عدد المواعيد: {confirmedGrouped[key].length})
+</td>
+</tr>
 
-      <span style={{
-        fontSize:"14px",
-        color:"#555",
-        marginRight:"10px"
-      }}>
-        (عدد المواعيد: {confirmedGrouped[key].length})
-      </span>
-    </h3>
-            {confirmedGrouped[key].map((item: Appointment)=>(
-          <div key={item.id} style={{display:"flex",gap:"10px",marginBottom:"6px"}}>
-  <div style={{width:"10px",height:"10px",borderRadius:"50%",background:getPriorityColor(item.priority)}}/>
-  <div>{formatTimeArabic(item.date)}</div>
-  <div style={{flex:1}}>{item.title}</div>
+{confirmedGrouped[key].map(item=>(
+<tr key={item.id} style={{borderBottom:"1px solid #ddd"}}>
 
-  <button
-    onClick={()=>setMoveDialog(item)}
-    style={{
-      background:"#ff9800",
-      color:"white",
-      border:"none",
-      padding:"4px 8px",
-      cursor:"pointer"
-    }}
-  >
-    نقل للانتظار
-  </button>
+<td style={{
+padding:"8px",
+textAlign:"center",
+width:"140px"
+}}>
+{formatTimeArabic(item.date)}
+</td>
 
-  <button onClick={()=>handleEdit(item)}>تعديل</button>
-  <button onClick={()=>handleDelete(item.id)}>حذف</button>
+<td style={{
+padding:"8px",
+whiteSpace:"normal",
+wordBreak:"break-word",
+lineHeight:"1.4"
+}}>
+{item.title}
+</td>
+
+<td style={{
+padding:"8px",
+textAlign:"center",
+width:"70px"
+}}>
+<div style={{
+width:"10px",
+height:"10px",
+borderRadius:"50%",
+margin:"auto",
+background:getPriorityColor(item.priority)
+}}></div>
+</td>
+
+<td style={{
+padding:"8px",
+textAlign:"left",
+width:"120px"
+}}>
+
+<div style={{
+display:"flex",
+alignItems:"center",
+gap:"14px"
+}}>
+
+<ArrowUpDown
+size={18}
+style={{cursor:"pointer"}}
+onMouseEnter={(e)=>e.currentTarget.style.color="#ff9800"}
+onMouseLeave={(e)=>e.currentTarget.style.color="black"}
+onClick={()=>{
+
+Swal.fire({
+title:"نقل الموعد",
+text:"هل تريد نقل الموعد بنفس التوقيت أم تعديل الموعد؟",
+icon:"question",
+
+showCancelButton:true,
+showCloseButton:true,
+
+confirmButtonText:"نقل بنفس الموعد",
+cancelButtonText:"تعديل الموعد",
+
+confirmButtonColor:"#ff9800",
+cancelButtonColor:"#2196F3",
+
+customClass:{
+closeButton:"swal-close-left"
+}
+
+}).then((result)=>{
+
+if(result.isConfirmed){
+
+moveToWaiting(item.id)
+
+}else if(result.dismiss === Swal.DismissReason.cancel){
+
+handleEdit(item)
+setStatus("waiting")
+
+}
+
+})
+
+}}
+/>
+
+<Pencil
+size={18}
+style={{cursor:"pointer"}}
+onMouseEnter={(e)=>e.currentTarget.style.color="#2196F3"}
+onMouseLeave={(e)=>e.currentTarget.style.color="black"}
+onClick={()=>handleEdit(item)}
+/>
+
+<Trash2
+size={18}
+style={{cursor:"pointer"}}
+onMouseEnter={(e)=>e.currentTarget.style.color="#f44336"}
+onMouseLeave={(e)=>e.currentTarget.style.color="black"}
+onClick={()=>handleDelete(item.id)}
+/>
+
 </div>
-            ))}
-          </div>
-        );
-      })}
+
+</td>
+
+</tr>
+))}
+
+</Fragment>
+)
+
+})}
+
+</tbody>
+
+</table>
+
 
       <hr style={{margin:"30px 0"}}/>
 
       <h2>قائمة الانتظار</h2>
+<table style={{
+width:"100%",
+borderCollapse:"collapse",
+marginTop:"15px"
+}}>
+
+<thead>
+<tr style={{
+background:"#ff9800",
+color:"white"
+}}>
+<th style={{padding:"10px",width:"150px",textAlign:"center"}}>الوقت</th>
+<th style={{padding:"10px",textAlign:"right"}}>الموعد</th>
+<th style={{padding:"10px",width:"120px",textAlign:"center"}}>الأولوية</th>
+<th style={{padding:"10px",width:"220px",textAlign:"center"}}>الإجراءات</th>
+</tr>
+</thead>
+
+<tbody>
+
 {Object.keys(waitingGrouped).map(key=>{
-  const dayDate = waitingGrouped[key][0].date;
 
- const today = new Date();
+const dayDate = waitingGrouped[key][0].date;
 
-const todayDate = new Date(
-  today.getFullYear(),
-  today.getMonth(),
-  today.getDate()
-);
+return (
 
-const targetDate = new Date(
-  dayDate.getFullYear(),
-  dayDate.getMonth(),
-  dayDate.getDate()
-);
+<Fragment key={key}>
 
-const diffDays = Math.floor(
-  (targetDate.getTime() - todayDate.getTime()) / (1000*60*60*24)
-);
+<tr style={{
+background:"#fff3cd",
+fontWeight:"bold"
+}}>
+<td colSpan={4} style={{padding:"8px"}}>
+{formatFullDateArabic(dayDate)}
+(عدد المواعيد: {waitingGrouped[key].length})
+</td>
+</tr>
 
-  const isToday = diffDays === 0;
-  const isSoon = diffDays > 0 && diffDays <= 5;
+{waitingGrouped[key].map(item=>(
+<tr key={item.id} style={{borderBottom:"1px solid #ddd"}}>
 
-  return (
-    <div key={key} style={{marginBottom:"20px"}}>
+<td style={{padding:"8px",textAlign:"center"}}>
+{formatTimeArabic(item.date)}
+</td>
 
-      <h3 style={{
-        background:isToday ? "#e3f2fd" : isSoon ? "#fff3cd" : "transparent",
-        padding:"6px",
-        borderRadius:"6px"
-      }}>
-        {formatFullDateArabic(dayDate)}
+<td style={{
+padding:"8px",
+maxWidth:"300px",
+whiteSpace:"normal",
+wordBreak:"break-word",
+lineHeight:"1.4"
+}}>
+{item.title}
+</td>
 
-        <span style={{
-          fontSize:"14px",
-          color:"#555",
-          marginRight:"10px"
-        }}>
-          (عدد المواعيد: {waitingGrouped[key].length})
-        </span>
-      </h3>
+<td style={{padding:"8px",textAlign:"center"}}>
+<div style={{
+width:"10px",
+height:"10px",
+borderRadius:"50%",
+margin:"auto",
+background:getPriorityColor(item.priority)
+}}></div>
+</td>
 
-      {isSoon && (
-        <div style={{
-          color:"#856404",
-          background:"#fff3cd",
-          padding:"6px",
-          borderRadius:"6px",
-          marginBottom:"6px"
-        }}>
-          تنبيه: الموعد بعد {diffDays} يوم
-        </div>
-      )}
-            {waitingGrouped[key].map((item: Appointment)=>(
-       <div key={item.id} style={{display:"flex",gap:"10px",marginBottom:"6px"}}>
-  <div style={{width:"10px",height:"10px",borderRadius:"50%",background:getPriorityColor(item.priority)}}/>
-  <div>{formatTimeArabic(item.date)}</div>
-  <div style={{flex:1}}>{item.title}</div>
+<td style={{padding:"8px",textAlign:"center"}}>
 
 <button
-  onClick={()=>setConfirmDialog(item)}
-  style={{
-    background:"#4CAF50",
-    color:"white",
-    border:"none",
-    padding:"4px 8px",
-    cursor:"pointer"
-  }}
+onClick={()=>setConfirmDialog(item)}
+style={{
+background:"#4CAF50",
+color:"white",
+border:"none",
+padding:"4px 8px",
+marginLeft:"5px",
+cursor:"pointer"
+}}
 >
 تحويل لمؤكد
 </button>
 
-  <button onClick={()=>handleEdit(item)}>تعديل</button>
-  <button onClick={()=>handleDelete(item.id)}>حذف</button>
-</div>
-            ))}
-          </div>
-        );
-      })}
+<button
+onClick={()=>handleEdit(item)}
+style={{marginLeft:"5px"}}
+>
+تعديل
+</button>
+
+<button
+onClick={()=>handleDelete(item.id)}
+>
+حذف
+</button>
+
+</td>
+
+</tr>
+))}
+
+</Fragment>
+
+)
+
+})}
+
+</tbody>
+
+</table>
 
     </main>
   );
