@@ -35,7 +35,7 @@ export default function Home() {
 
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState("عادي");
-  const [status, setStatus] = useState<"confirmed" | "waiting">("confirmed");
+  const [status, setStatus] = useState<"confirmed" | "waiting" | "unscheduled">("confirmed");
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [conflictData, setConflictData] = useState<Appointment | null>(null);
