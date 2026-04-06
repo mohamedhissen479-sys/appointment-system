@@ -1,8 +1,9 @@
 "use client";
-
+import { supabase } from "@/lib/supabase";
 import { useState, useMemo, useEffect, Fragment } from "react";
 import Swal from "sweetalert2";
 import { ArrowUpDown, Pencil, Trash2, Clock } from "lucide-react";
+import Link from "next/link";
 type Appointment = {
   id: number;
   date: Date | null;
@@ -12,15 +13,27 @@ type Appointment = {
 };
 
 const months = [
-  "يناير","فبراير","مارس","أبريل","مايو","يونيو",
-  "يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"
+  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
 ];
 
 const displayWeekDays = [
-  "السبت","الأحد","الاثنين","الثلاثاء",
-  "الأربعاء","الخميس","الجمعة"
+  "السبت", "الأحد", "الاثنين", "الثلاثاء",
+  "الأربعاء", "الخميس", "الجمعة"
 ];
+const formatTimeArabic = (date: Date) => {
+  let hours = date.getHours();
+  const minutes = date.getMinutes();
 
+  const period = hours >= 12 ? "م" : "ص";
+
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+
+  const formattedMinutes = minutes < 10 ? "0" + minutes : minutes;
+
+  return `${hours}:${formattedMinutes} ${period}`;
+};
 export default function Home() {
   const now = new Date();
 
@@ -38,29 +51,47 @@ export default function Home() {
   const [status, setStatus] = useState<"confirmed" | "waiting" | "unscheduled">("confirmed");
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+
   const [conflictData, setConflictData] = useState<Appointment | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
-const [moveDialog, setMoveDialog] = useState<Appointment | null>(null);
+  const [moveDialog, setMoveDialog] = useState<Appointment | null>(null);
 
-const [rangeOffset,setRangeOffset] = useState(0);
-const [showTodayPopup,setShowTodayPopup] = useState(false);
-  // 🔹 تحميل من LocalStorage
-  useEffect(() => {
-    const saved = localStorage.getItem("appointments");
-    if (saved) {
-      const parsed = JSON.parse(saved).map((a:any)=>({
+  const [rangeOffset, setRangeOffset] = useState(0);
+  const [showTodayPopup, setShowTodayPopup] = useState(false);
+  const [showDateTime, setShowDateTime] = useState(true);
+  // 🔹 تحميل من Supabase
+  const loadData = async () => {
+    const { data, error } = await supabase
+      .from("appointments")
+      .select("*")
+      .order("id", { ascending: false });
+
+    if (error) return;
+
+    if (data) {
+      const parsed = data.map((a: any) => ({
         ...a,
-        date: new Date(a.date)
+        date: a.date ? new Date(a.date) : null
       }));
-      setAppointments(parsed);
+
+      const filtered = parsed.filter(a => {
+        if (a.status === "unscheduled") return true;
+
+        if (!a.date) return false;
+
+        const today = new Date();
+        return a.date >= today;
+      });
+
+      setAppointments(filtered);
     }
+  };
+
+  useEffect(() => {
+    loadData();
   }, []);
 
-  // 🔹 حفظ تلقائي
-  useEffect(() => {
-    localStorage.setItem("appointments", JSON.stringify(appointments));
-  }, [appointments]);
 
   const convertArabicToEnglish = (value: string) => {
     const arabicNumbers = "٠١٢٣٤٥٦٧٨٩";
@@ -83,23 +114,19 @@ const [showTodayPopup,setShowTodayPopup] = useState(false);
   }, [month, year, selectedDayName]);
 
   const buildDate = () => {
-    if (selectedDayNumber === null) return null;
+    if (!selectedDayNumber) return null;
 
-    let hours24 = hour;
-    if (period === "PM" && hour < 12) hours24 += 12;
-    if (period === "AM" && hour === 12) hours24 = 0;
+    let h = hour;
 
-    return new Date(year, month, selectedDayNumber, hours24, minute);
+    if (period === "PM" && h !== 12) h += 12;
+    if (period === "AM" && h === 12) h = 0;
+
+    const date = new Date(year, month, selectedDayNumber, h, minute);
+
+    date.setSeconds(0, 0); // مهم جدًا
+
+    return date;
   };
-
-  const formatTimeArabic = (date: Date) => {
-    const h = date.getHours();
-    const m = date.getMinutes();
-    const ampm = h >= 12 ? "مساءً" : "صباحًا";
-    const hour12 = h % 12 || 12;
-    return `${hour12}:${m.toString().padStart(2,"0")} ${ampm}`;
-  };
-
   const formatFullDateArabic = (date: Date) => {
     const dayName = date.toLocaleDateString("ar-EG", { weekday: "long" });
     const formattedDate = date.toLocaleDateString("en-CA");
@@ -112,381 +139,484 @@ const [showTodayPopup,setShowTodayPopup] = useState(false);
     return "green";
   };
 
-  const handleSave = (force = false, updateExisting = false) => {
-const newDate = status === "unscheduled" ? null : buildDate();
+  const handleSave = async (force = false, updateExisting = false) => {
 
-if (status !== "unscheduled" && !newDate) {
-  Swal.fire({
-    icon: "warning",
-    title: "تنبيه",
-    text: "يرجى تحديد التاريخ والوقت أولاً"
-  });
-  return;
-}
+    const newDate = status === "unscheduled" ? null : buildDate();
 
-if (!title) {
-  Swal.fire({
-    icon: "warning",
-    title: "تنبيه",
-    text: "يرجى إدخال اسم الموعد"
-  });
-  return;
-}
+    console.log("NEW DATE:", newDate);
+    console.log("ISO:", newDate?.toISOString());
 
-const nowTime = new Date();
-
-// منع وقت قديم في نفس اليوم فقط
-if (
-  newDate &&
-  newDate.toDateString() === nowTime.toDateString() &&
-  newDate.getTime() < nowTime.getTime()
-) {
-  alert("لا يمكن اختيار وقت سابق عن الوقت الحالي");
-  return;
-}
-
-let conflict: Appointment | undefined = undefined;
-
-if (newDate) {
-  conflict = appointments.find(
-    a =>
-      a.date &&
-      a.date.getTime() === newDate.getTime() &&
-      a.id !== editingId
-  );
-}
-
-    if (conflict && !force) {
-      setConflictData(conflict);
+    // ❗ Validation
+    if (status !== "unscheduled" && !newDate) {
+      Swal.fire({
+        icon: "warning",
+        title: "تنبيه",
+        text: "يرجى تحديد التاريخ والوقت أولاً"
+      });
       return;
     }
 
-    if (updateExisting && conflict) {
-      setAppointments(prev =>
-        prev.map(a =>
-          a.id === conflict.id
-            ? { ...a, title, priority, status }
-            : a
-        )
-      );
-    } else if (editingId !== null) {
-      setAppointments(prev =>
-        prev.map(a =>
-          a.id === editingId
-            ? { ...a, date: newDate, title, priority, status }
-            : a
-        )
-      );
-      setEditingId(null);
-    } else {
-      setAppointments(prev => [
-        ...prev,
-        { id: Date.now(), date: newDate, title, priority, status }
-      ]);
+    if (!title) {
+      Swal.fire({
+        icon: "warning",
+        title: "تنبيه",
+        text: "يرجى إدخال اسم الموعد"
+      });
+      return;
     }
 
+    // ❗ منع وقت قديم
+    const now = new Date();
+    if (
+      newDate &&
+      newDate.toDateString() === now.toDateString() &&
+      newDate.getTime() < now.getTime()
+    ) {
+      alert("لا يمكن اختيار وقت سابق عن الوقت الحالي");
+      return;
+    }
+
+    // 🔥 الحل النهائي للتعارض (مضمون 100%)
+    if (newDate) {
+
+      const isoDate = newDate.toISOString();
+
+      const { data: existing, error: checkError } = await supabase
+        .from("appointments")
+        .select("id, date, status")
+        .eq("status", "confirmed")
+        .eq("date", isoDate);
+
+      console.log("CHECK:", existing, checkError);
+
+      if (existing && existing.length > 0 && !force) {
+        Swal.fire({
+          icon: "warning",
+          title: "الموعد محجوز",
+          text: "يوجد موعد آخر في نفس الوقت"
+        });
+        return;
+      }
+    }
+
+    // 🔥 الحفظ
+    const { error } = await supabase
+      .from("appointments")
+      .insert([
+        {
+          title,
+          priority,
+          status,
+          date: newDate ? newDate.toISOString() : null
+        }
+      ]);
+
+    console.log("INSERT ERROR:", error);
+
+    if (error) {
+      Swal.fire({
+        icon: "error",
+        title: "خطأ",
+        text: "فشل في حفظ الموعد"
+      });
+      return;
+    }
+
+    // 🔄 تحديث البيانات
+    await loadData();
+
+    // 🧹 Reset
     setConflictData(null);
     setTitle("");
   };
 
- const handleDelete = (id:number) => {
+  // 🗑 حذف موعد
+  const handleDelete = async (id: number) => {
 
-  const confirmDelete = confirm("هل أنت متأكد من حذف هذا الموعد؟");
+    const confirmDelete = confirm("هل أنت متأكد من حذف هذا الموعد؟");
+    if (!confirmDelete) return;
 
-  if(!confirmDelete) return;
+    const { error } = await supabase
+      .from("appointments")
+      .delete()
+      .eq("id", id);
 
-  setAppointments(prev =>
-    prev.filter(a => a.id !== id)
-  );
-};
-const moveToConfirmed = (id:number) => {
-  setAppointments(prev =>
-    prev.map(a =>
-      a.id === id
-        ? { ...a, status: "confirmed" }
-        : a
-    )
-  );
-};
-const moveToWaiting = (id:number) => {
-  setAppointments(prev =>
-    prev.map(a =>
-      a.id === id
-        ? { ...a, status: "waiting" }
-        : a
-    )
-  );
-};
+    console.log("DELETE ERROR:", error);
 
-const [confirmDialog,setConfirmDialog] = useState<Appointment | null>(null);
+    if (error) return;
 
-const moveToUnscheduled = (id:number) => {
-  setAppointments(prev =>
-    prev.map(a =>
-      a.id === id
-        ? { ...a, status: "unscheduled", date: null }
-        : a
-    )
-  );
-};
-  
-  const handleEdit = (app:Appointment) => {
+    await loadData();
+  };
+
+
+  // ✅ نقل إلى مؤكد
+  const moveToConfirmed = async (id: number) => {
+
+    const { error } = await supabase
+      .from("appointments")
+      .update({ status: "confirmed" })
+      .eq("id", id);
+
+    console.log("UPDATE CONFIRMED ERROR:", error);
+
+    if (error) return;
+
+    await loadData();
+  };
+
+
+  // ⏳ نقل إلى انتظار
+  const moveToWaiting = async (id: number) => {
+
+    const { error } = await supabase
+      .from("appointments")
+      .update({ status: "waiting" })
+      .eq("id", id);
+
+    console.log("UPDATE WAITING ERROR:", error);
+
+    if (error) return;
+
+    await loadData();
+  };
+
+
+  // ❌ بدون موعد
+  const moveToUnscheduled = async (id: number) => {
+
+    const { error } = await supabase
+      .from("appointments")
+      .update({
+        status: "unscheduled",
+        date: null
+      })
+      .eq("id", id);
+
+    console.log("UPDATE UNSCHEDULED ERROR:", error);
+
+    if (error) return;
+
+    await loadData();
+  };
+
+
+  // 🔹 dialog (زي ما هو)
+  const [confirmDialog, setConfirmDialog] = useState<Appointment | null>(null);
+
+  const handleEdit = (app: Appointment) => {
     setEditingId(app.id);
     setTitle(app.title);
     setPriority(app.priority);
     setStatus(app.status);
 
-const d = app.date;
+    const d = app.date;
 
-if (d) {
+    if (d) {
 
-  setMonth(d.getMonth());
-  setYear(d.getFullYear());
-  setSelectedDayName(d.toLocaleDateString("ar-EG",{weekday:"long"}));
-  setSelectedDayNumber(d.getDate());
+      setMonth(d.getMonth());
+      setYear(d.getFullYear());
+      setSelectedDayName(d.toLocaleDateString("ar-EG", { weekday: "long" }));
+      setSelectedDayNumber(d.getDate());
 
-  const h = d.getHours();
+      const h = d.getHours();
 
-  if (h >= 12) {
-    setPeriod("PM");
-    setHour(h === 12 ? 12 : h - 12);
-  } else {
-    setPeriod("AM");
-    setHour(h === 0 ? 12 : h);
-  }
+      if (h >= 12) {
+        setPeriod("PM");
+        setHour(h === 12 ? 12 : h - 12);
+      } else {
+        setPeriod("AM");
+        setHour(h === 0 ? 12 : h);
+      }
 
-  setMinute(d.getMinutes());
+      setMinute(d.getMinutes());
 
-} else {
+    } else {
 
-  setSelectedDayName(null);
-  setSelectedDayNumber(null);
+      setSelectedDayName(null);
+      setSelectedDayNumber(null);
 
-}
+    }
   };
 
   // ترتيب المواعيد
-const sorted = [...appointments].sort((a, b) => {
+  // الوقت الحالي
+  const nowTime = new Date();
 
-  if (!a.date && !b.date) return 0;
+  // المواعيد المنتهية (الأرشيف)
+  const archivedAppointments = appointments.filter(a =>
+    a.date && a.date.getTime() < nowTime.getTime()
+  );
 
-  if (!a.date) return 1;
+  // المواعيد القادمة فقط
+  const upcomingAppointments = appointments.filter(a =>
+    !a.date || a.date.getTime() >= nowTime.getTime()
+  );
+  const sorted = [...upcomingAppointments].sort((a, b) => {
 
-  if (!b.date) return -1;
+    if (!a.date && !b.date) return 0;
 
-  return a.date.getTime() - b.date.getTime();
+    if (!a.date) return 1;
 
-});
+    if (!b.date) return -1;
 
-// فلترة البحث
-const filtered = sorted.filter(a => {
+    return a.date.getTime() - b.date.getTime();
 
-  const text = searchTerm.toLowerCase();
+  });
 
-  const dateText = a.date
-    ? a.date.toLocaleDateString("ar-EG", { weekday: "long" }) +
+  // فلترة البحث
+  const filtered = sorted.filter(a => {
+
+    const text = searchTerm.toLowerCase();
+
+    const dateText = a.date
+      ? a.date.toLocaleDateString("ar-EG", { weekday: "long" }) +
       " " +
       a.date.toLocaleDateString("en-CA") +
       " " +
-      formatTimeArabic(a.date)
-    : "بدون موعد";
+      formatTimeArabic(new Date(a.date))
+      : "بدون موعد";
 
-  const fullText =
-    a.title +
-    " " +
-    a.priority +
-    " " +
-    dateText;
+    const fullText =
+      a.title +
+      " " +
+      a.priority +
+      " " +
+      dateText;
 
-  return fullText.toLowerCase().includes(text);
+    return fullText.toLowerCase().includes(text);
 
-});
-  const groupByDay = (list:Appointment[]) => {
-    const grouped:any = {};
-    list.forEach(app=>{
+  });
+  const groupByDay = (list: Appointment[]) => {
+    const grouped: any = {};
+    list.forEach(app => {
       const key = app.date.toDateString();
-      if (!grouped[key]) grouped[key]=[];
+      if (!grouped[key]) grouped[key] = [];
       grouped[key].push(app);
     });
     return grouped;
   };
 
-  const confirmedGrouped = groupByDay(filtered.filter(a=>a.status==="confirmed"));
-  
-const confirmedKeys = Object.keys(confirmedGrouped)
-.sort((a,b)=> new Date(a).getTime() - new Date(b).getTime());
+  const confirmedGrouped = groupByDay(filtered.filter(a => a.status === "confirmed"));
 
-const pageSize = 7; // عدد الأيام في الصفحة
+  const confirmedKeys = Object.keys(confirmedGrouped)
+    .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
 
-const startIndex = rangeOffset * pageSize;
-const endIndex = startIndex + pageSize;
+  const pageSize = 7; // عدد الأيام في الصفحة
 
-const pagedConfirmedKeys = confirmedKeys.slice(startIndex,endIndex);
-const totalPages = Math.ceil(confirmedKeys.length / pageSize);
-const waitingGrouped = groupByDay(filtered.filter(a=>a.status==="waiting"));
-const unscheduled = filtered.filter(a=>a.status==="unscheduled");
+  const startIndex = rangeOffset * pageSize;
+  const endIndex = startIndex + pageSize;
+
+  const pagedConfirmedKeys = confirmedKeys.slice(startIndex, endIndex);
+  const totalPages = Math.ceil(confirmedKeys.length / pageSize);
+  const waitingGrouped = groupByDay(filtered.filter(a => a.status === "waiting"));
+  const unscheduled = filtered.filter(a => a.status === "unscheduled");
 
   return (
-    <main style={{direction:"rtl",padding:"40px",maxWidth:"1000px",margin:"auto"}}>
+    <main style={{ direction: "rtl", padding: "40px", maxWidth: "1000px", margin: "auto" }}>
 
-      <h1 style={{textAlign:"center",marginBottom:"30px"}}>
-        
+      <h1 style={{ textAlign: "center", marginBottom: "30px" }}>
+
         برنامج إدارة المواعيد
       </h1>
-      عرض مواعيد اليوم
-<div style={{display:"flex",justifyContent:"space-between",marginBottom:"10px"}}>
+      <div style={{ marginBottom: "20px" }}>
 
-<button
-onClick={()=>setShowTodayPopup(true)}
-style={{
-background:"#2196F3",
-color:"white",
-border:"none",
-padding:"6px 12px",
-cursor:"pointer"
-}}
->
-مواعيد اليوم
-</button>
+        <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
 
-</div>
-      {/* الشهر والسنة */}
-      <div style={{display:"flex",gap:"15px",marginBottom:"20px"}}>
-        <select value={month} onChange={e=>setMonth(Number(e.target.value))}>
-          {months.map((m,i)=><option key={i} value={i}>{m}</option>)}
-        </select>
+          <Link href="/archive">
+            <button
+              style={{
+                background: "#607D8B",
+                color: "white",
+                border: "none",
+                padding: "8px 16px",
+                cursor: "pointer",
+                borderRadius: "6px"
+              }}
+            >
+              فتح أرشيف المواعيد
+            </button>
+          </Link>
 
-        <select value={year} onChange={e=>setYear(Number(e.target.value))}>
-          {Array.from({length:10}).map((_,i)=>{
-            const y = now.getFullYear()-2+i;
-            return <option key={y}>{y}</option>;
-          })}
-        </select>
+          {status !== "unscheduled" && (
+            <button
+              onClick={() => setShowDateTime(!showDateTime)}
+              style={{
+                background: "#607D8B",
+                color: "white",
+                border: "none",
+                padding: "8px 16px",
+                cursor: "pointer",
+                borderRadius: "6px"
+              }}
+            >
+              {showDateTime ? "إخفاء التاريخ والتوقيت" : "إظهار التاريخ والتوقيت"}
+            </button>
+          )}
+
+        </div>
+
       </div>
 
-      {/* أيام الأسبوع */}
-      <div style={{display:"flex",gap:"10px",marginBottom:"15px"}}>
-        {displayWeekDays.map(day=>(
-          <div
-            key={day}
-            onClick={()=>{setSelectedDayName(day);setSelectedDayNumber(null);}}
-            style={{
-              padding:"8px 14px",
-              border:"1px solid #ccc",
-              cursor:"pointer",
-              background:selectedDayName===day?"#4CAF50":"#eee",
-              color:selectedDayName===day?"white":"black"
-            }}
-          >
-            {day}
+      <div style={{ marginBottom: "10px", fontWeight: "bold" }}>
+        عرض مواعيد اليوم
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
+
+        <button
+          onClick={() => setShowTodayPopup(true)}
+          style={{
+            background: "#2196F3",
+            color: "white",
+            border: "none",
+            padding: "6px 12px",
+            cursor: "pointer"
+          }}
+        >
+          مواعيد اليوم
+        </button>
+
+      </div>
+      {showDateTime && (
+        <>
+          {/* الشهر والسنة */}
+          <div style={{ display: "flex", gap: "15px", marginBottom: "20px" }}>
+            <select value={month} onChange={e => setMonth(Number(e.target.value))}>
+              {months.map((m, i) => <option key={i} value={i}>{m}</option>)}
+            </select>
+
+            <select value={year} onChange={e => setYear(Number(e.target.value))}>
+              {Array.from({ length: 10 }).map((_, i) => {
+                const y = now.getFullYear() - 2 + i;
+                return <option key={y}>{y}</option>;
+              })}
+            </select>
           </div>
-        ))}
-      </div>
 
-      {/* التواريخ */}
-      {selectedDayName && (
-        <div style={{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"20px"}}>
-{availableDates.map(d=>{
-  const today = new Date();
-  const thisDate = new Date(year, month, d);
+          {/* أيام الأسبوع */}
+          <div style={{ display: "flex", gap: "10px", marginBottom: "15px" }}>
+            {displayWeekDays.map(day => (
+              <div
+                key={day}
+                onClick={() => { setSelectedDayName(day); setSelectedDayNumber(null); }}
+                style={{
+                  padding: "8px 14px",
+                  border: "1px solid #ccc",
+                  cursor: "pointer",
+                  background: selectedDayName === day ? "#4CAF50" : "#eee",
+                  color: selectedDayName === day ? "white" : "black"
+                }}
+              >
+                {day}
+              </div>
+            ))}
+          </div>
 
-  const isPastDay =
-    thisDate.setHours(0,0,0,0) <
-    new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+          {/* التواريخ */}
+          {selectedDayName && (
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "20px" }}>
+              {availableDates.map(d => {
+                const today = new Date();
+                const thisDate = new Date(year, month, d);
 
-  const isToday =
-    d === today.getDate() &&
-    month === today.getMonth() &&
-    year === today.getFullYear();
+                const isPastDay =
+                  thisDate.setHours(0, 0, 0, 0) <
+                  new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
 
-  return (
-    <div
-      key={d}
-      onClick={()=>!isPastDay && setSelectedDayNumber(d)}
-      style={{
-        padding:"6px 12px",
-        border:"1px solid #999",
-        cursor:isPastDay ? "not-allowed" : "pointer",
-        background:isPastDay
-          ? "#ddd"
-          : selectedDayNumber===d
-            ? "#4CAF50"
-            : isToday
-              ? "#bbdefb"
-              : "#f5f5f5",
-        color:isPastDay
-          ? "#888"
-          : selectedDayNumber===d
-            ? "white"
-            : "black",
-        fontWeight:isToday ? "bold" : "normal",
-        opacity:isPastDay ? 0.6 : 1
-      }}
-    >
-      {d}
-    </div>
-  );
-})}
-        </div>
+                const isToday =
+                  d === today.getDate() &&
+                  month === today.getMonth() &&
+                  year === today.getFullYear();
+
+                return (
+                  <div
+                    key={d}
+                    onClick={() => !isPastDay && setSelectedDayNumber(d)}
+                    style={{
+                      padding: "6px 12px",
+                      border: "1px solid #999",
+                      cursor: isPastDay ? "not-allowed" : "pointer",
+                      background: isPastDay
+                        ? "#ddd"
+                        : selectedDayNumber === d
+                          ? "#4CAF50"
+                          : isToday
+                            ? "#bbdefb"
+                            : "#f5f5f5",
+                      color: isPastDay
+                        ? "#888"
+                        : selectedDayNumber === d
+                          ? "white"
+                          : "black",
+                      fontWeight: isToday ? "bold" : "normal",
+                      opacity: isPastDay ? 0.6 : 1
+                    }}
+                  >
+                    {d}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* مربع التوقيت */}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "20px" }}>
+            <div style={{
+              border: "2px solid #4CAF50",
+              borderRadius: "10px",
+              padding: "15px",
+              direction: "ltr",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px"
+            }}>
+              <input
+                type="text"
+                value={hour}
+                onFocus={() => setHour(0)}
+                onChange={(e) => {
+                  const num = Number(convertArabicToEnglish(e.target.value));
+                  if (num >= 0 && num <= 12) setHour(num);
+                }}
+                style={{ width: "60px", textAlign: "center" }}
+              />
+              <span>:</span>
+              <input
+                type="text"
+                value={minute.toString().padStart(2, "0")}
+                onFocus={() => setMinute(0)}
+                onChange={(e) => {
+                  const num = Number(convertArabicToEnglish(e.target.value));
+                  if (num >= 0 && num <= 59) setMinute(num);
+                }}
+                style={{ width: "60px", textAlign: "center" }}
+              />
+              <button onClick={() => setPeriod("AM")}
+                style={{ background: period === "AM" ? "#4CAF50" : "#ccc", padding: "6px 12px" }}>
+                صباحًا
+              </button>
+              <button onClick={() => setPeriod("PM")}
+                style={{ background: period === "PM" ? "#4CAF50" : "#ccc", padding: "6px 12px" }}>
+                مساءً
+              </button>
+            </div>
+          </div>
+        </>
       )}
-
-      {/* مربع التوقيت */}
-      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:"20px"}}>
-        <div style={{
-          border:"2px solid #4CAF50",
-          borderRadius:"10px",
-          padding:"15px",
-          direction:"ltr",
-          display:"flex",
-          alignItems:"center",
-          gap:"8px"
-        }}>
-          <input
-            type="text"
-            value={hour}
-            onFocus={()=>setHour(0)}
-            onChange={(e)=>{
-              const num = Number(convertArabicToEnglish(e.target.value));
-              if (num>=0 && num<=12) setHour(num);
-            }}
-            style={{width:"60px",textAlign:"center"}}
-          />
-          <span>:</span>
-          <input
-            type="text"
-            value={minute.toString().padStart(2,"0")}
-            onFocus={()=>setMinute(0)}
-            onChange={(e)=>{
-              const num = Number(convertArabicToEnglish(e.target.value));
-              if (num>=0 && num<=59) setMinute(num);
-            }}
-            style={{width:"60px",textAlign:"center"}}
-          />
-          <button onClick={()=>setPeriod("AM")}
-            style={{background:period==="AM"?"#4CAF50":"#ccc",padding:"6px 12px"}}>
-            صباحًا
-          </button>
-          <button onClick={()=>setPeriod("PM")}
-            style={{background:period==="PM"?"#4CAF50":"#ccc",padding:"6px 12px"}}>
-            مساءً
-          </button>
-        </div>
-      </div>
-
       {/* الاسم + الأولوية */}
-      <div style={{display:"flex",gap:"10px",marginBottom:"10px"}}>
+      <div style={{ display: "flex", gap: "10px", marginBottom: "10px" }}>
         <input
           placeholder="اسم الموعد"
           value={title}
-          onChange={e=>setTitle(e.target.value)}
+          onChange={e => setTitle(e.target.value)}
           style={{
-            flex:1,
-            border:"3px solid #4CAF50",
-            borderRadius:"8px",
-            padding:"8px"
+            flex: 1,
+            border: "3px solid #4CAF50",
+            borderRadius: "8px",
+            padding: "8px"
           }}
         />
-        <select value={priority} onChange={e=>setPriority(e.target.value)}>
+        <select value={priority} onChange={e => setPriority(e.target.value)}>
           <option>عالي</option>
           <option>متوسط</option>
           <option>عادي</option>
@@ -494,722 +624,769 @@ cursor:"pointer"
       </div>
 
       {/* اختيار الحالة */}
-<div style={{display:"flex",gap:"10px",marginBottom:"15px"}}>
+      <div style={{ display: "flex", gap: "10px", marginBottom: "15px" }}>
 
-<button
-onClick={()=>setStatus("confirmed")}
-style={{background:status==="confirmed"?"#4CAF50":"#ccc",padding:"6px 12px"}}
->
-موعد مؤكد
-</button>
+        <button
+          onClick={() => {
+            setStatus("confirmed");
+            setShowDateTime(true);
+          }}
+          style={{ background: status === "confirmed" ? "#4CAF50" : "#ccc", padding: "6px 12px" }}
+        >
+          موعد مؤكد
+        </button>
 
-<button
-onClick={()=>setStatus("waiting")}
-style={{background:status==="waiting"?"#ff9800":"#ccc",padding:"6px 12px"}}
->
-قائمة انتظار
-</button>
+        <button
+          onClick={() => {
+            setStatus("waiting");
+            setShowDateTime(true);
+          }}
+          style={{ background: status === "waiting" ? "#ff9800" : "#ccc", padding: "6px 12px" }}
+        >
+          قائمة انتظار
+        </button>
 
-<button
-onClick={()=>setStatus("unscheduled")}
-style={{background:status==="unscheduled"?"#607D8B":"#ccc",padding:"6px 12px"}}
->
-بدون موعد
-</button>
+        <button
+          onClick={() => {
+            setStatus("unscheduled");
+            setShowDateTime(false);
+          }}
+          style={{ background: status === "unscheduled" ? "#607D8B" : "#ccc", padding: "6px 12px" }}
+        >
+          بدون موعد
+        </button>
 
-</div>
+
+      </div>
 
       <button
-        onClick={()=>handleSave()}
+        onClick={() => handleSave()}
         style={{
-          padding:"10px 20px",
-          background:"#4CAF50",
-          color:"white",
-          border:"none",
-          borderRadius:"6px",
-          cursor:"pointer",
-          fontSize:"16px"
+          padding: "10px 20px",
+          background: "#4CAF50",
+          color: "white",
+          border: "none",
+          borderRadius: "6px",
+          cursor: "pointer",
+          fontSize: "16px"
         }}
       >
         {editingId ? "تحديث" : "إضافة"}
       </button>
 
+      {confirmDialog && (
+        <div style={{
+          marginTop: "20px",
+          padding: "15px",
+          border: "2px solid green",
+          borderRadius: "8px",
+          background: "#e8f5e9"
+        }}>
 
-{confirmDialog && (
-  <div style={{
-    marginTop:"20px",
-    padding:"15px",
-    border:"2px solid green",
-    borderRadius:"8px",
-    background:"#e8f5e9"
-  }}>
+          هل تريد تحويل الموعد إلى مؤكد؟
 
-    هل تريد تحويل الموعد إلى مؤكد؟
+          <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
 
-    <div style={{display:"flex",gap:"10px",marginTop:"10px"}}>
+            <button
+              onClick={() => {
+                moveToConfirmed(confirmDialog.id);
+                setConfirmDialog(null);
+              }}
+              style={{
+                flex: 1,
+                padding: "8px",
+                background: "#4CAF50",
+                color: "white",
+                border: "none"
+              }}
+            >
+              تحويل بنفس الموعد
+            </button>
 
-      <button
-        onClick={()=>{
-          moveToConfirmed(confirmDialog.id);
-          setConfirmDialog(null);
-        }}
-        style={{
-          flex:1,
-          padding:"8px",
-          background:"#4CAF50",
-          color:"white",
-          border:"none"
-        }}
-      >
-        تحويل بنفس الموعد
-      </button>
+            <button
+              onClick={() => {
+                handleEdit(confirmDialog);
+                setStatus("confirmed");
+                setConfirmDialog(null);
+              }}
+              style={{
+                flex: 1,
+                padding: "8px",
+                background: "#2196F3",
+                color: "white",
+                border: "none"
+              }}
+            >
+              تعديل الموعد
+            </button>
 
-      <button
-        onClick={()=>{
-          handleEdit(confirmDialog);
-          setStatus("confirmed");
-          setConfirmDialog(null);
-        }}
-        style={{
-          flex:1,
-          padding:"8px",
-          background:"#2196F3",
-          color:"white",
-          border:"none"
-        }}
-      >
-        تعديل الموعد
-      </button>
+          </div>
 
-    </div>
-
-  </div>
-)}
+        </div>
+      )}
       {conflictData && (
         <div style={{
-          marginTop:"20px",
-          padding:"15px",
-          border:"2px solid red",
-          borderRadius:"8px",
-          background:"#ffeaea"
+          marginTop: "20px",
+          padding: "15px",
+          border: "2px solid red",
+          borderRadius: "8px",
+          background: "#ffeaea"
         }}>
           يوجد موعد بنفس التاريخ والتوقيت
-          <div style={{display:"flex",gap:"10px",marginTop:"10px"}}>
+          <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
             <button
-              onClick={()=>handleSave(true,false)}
-              style={{flex:1,padding:"8px",background:"#4CAF50",color:"white",border:"none"}}
+              onClick={() => handleSave(true, false)}
+              style={{ flex: 1, padding: "8px", background: "#4CAF50", color: "white", border: "none" }}
             >
               موافق
             </button>
             <button
-              onClick={()=>handleSave(true,true)}
-              style={{flex:1,padding:"8px",background:"#ff9800",color:"white",border:"none"}}
+              onClick={() => handleSave(true, true)}
+              style={{ flex: 1, padding: "8px", background: "#ff9800", color: "white", border: "none" }}
             >
               تحديث الموعد الموجود
             </button>
           </div>
         </div>
       )}
-<div style={{marginBottom:"20px"}}>
-  <input
-    placeholder="🔎 بحث عن موعد..."
-    value={searchTerm}
-    onChange={(e)=>setSearchTerm(e.target.value)}
-    style={{
-      width:"100%",
-      padding:"10px",
-      border:"2px solid #2196F3",
-      borderRadius:"8px"
-    }}
-  />
-</div>
+      <div style={{ marginBottom: "20px" }}>
+        <input
+          placeholder="🔎 بحث عن موعد..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          style={{
+            width: "100%",
+            padding: "10px",
+            border: "2px solid #2196F3",
+            borderRadius: "8px"
+          }}
+        />
+      </div>
 
-{showTodayPopup && (
-<div style={{
-position:"fixed",
-top:"50%",
-left:"50%",
-transform:"translate(-50%,-50%)",
-background:"white",
-padding:"20px",
-border:"2px solid #2196F3",
-borderRadius:"10px",
-zIndex:1000,
-minWidth:"300px",
-boxShadow:"0 0 10px rgba(0,0,0,0.3)"
-}}>
+      {showTodayPopup && (
+        <div style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%,-50%)",
+          background: "white",
+          padding: "20px",
+          border: "2px solid #2196F3",
+          borderRadius: "10px",
+          zIndex: 1000,
+          minWidth: "300px",
+          boxShadow: "0 0 10px rgba(0,0,0,0.3)"
+        }}>
 
-<h3>مواعيد اليوم</h3>
+          <h3>مواعيد اليوم</h3>
 
-<table style={{
-width:"100%",
-borderCollapse:"collapse",
-marginTop:"10px",
-tableLayout:"fixed"
-}}>
+          <table style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            marginTop: "10px",
+            tableLayout: "fixed"
+          }}>
 
-<thead>
-<tr style={{background:"#2196F3",color:"white"}}>
-<th style={{padding:"6px"}}>الوقت</th>
-<th style={{padding:"6px"}}>اسم الموعد</th>
-<th style={{padding:"6px"}}>الأولوية</th>
-</tr>
-</thead>
+            <thead>
+              <tr style={{ background: "#2196F3", color: "white" }}>
+                <th style={{ padding: "6px" }}>الوقت</th>
+                <th style={{ padding: "6px" }}>اسم الموعد</th>
+                <th style={{ padding: "6px" }}>الأولوية</th>
+              </tr>
+            </thead>
 
-<tbody>
-{appointments
-.filter(a=>{
-const now=new Date();
-return a.date.toDateString()===now.toDateString();
-})
-.sort((a,b)=>a.date.getTime()-b.date.getTime())
-.map(a=>(
-<tr key={a.id} style={{borderBottom:"1px solid #ccc"}}>
-<td style={{padding:"6px"}}>
-{formatTimeArabic(a.date)}
-</td>
+            <tbody>
+              {appointments
+                .filter(a => {
+                  const now = new Date();
 
-<td style={{padding:"6px"}}>
-{a.title}
-</td>
+                  if (!a.date) return false;
 
-<td style={{padding:"6px",textAlign:"center"}}>
+                  const d = new Date(a.date);
 
-<div style={{
-display:"flex",
-alignItems:"center",
-justifyContent:"center",
-gap:"6px"
-}}>
+                  return d.toDateString() === now.toDateString();
+                })
+                .sort((a, b) => {
+                  const d1 = new Date(a.date);
+                  const d2 = new Date(b.date);
 
-<div style={{
-width:"10px",
-height:"10px",
-borderRadius:"50%",
-background:getPriorityColor(a.priority)
-}}></div>
+                  return d1.getTime() - d2.getTime();
+                })
+                .map(a => {
+                  const d = new Date(a.date);
 
-<span>
-{a.priority}
-</span>
+                  return (
+                    <tr key={a.id} style={{ borderBottom: "1px solid #ccc" }}>
+                      <td style={{ padding: "6px" }}>
+                        {formatTimeArabic(d)}
+                      </td>
 
-</div>
+                      <td style={{ padding: "6px" }}>
+                        {a.title}
+                      </td>
 
-</td>
+                      <td style={{ padding: "6px", textAlign: "center" }}>
+                        <div style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: "6px"
+                        }}>
+                          <div style={{
+                            width: "10px",
+                            height: "10px",
+                            borderRadius: "50%",
+                            background: getPriorityColor(a.priority)
+                          }}></div>
 
-</tr>
-))}
-</tbody>
+                          <span>
+                            {a.priority}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
 
-</table>
+            </table>
 
-<div style={{marginTop:"10px",textAlign:"center"}}>
-<button
-onClick={()=>setShowTodayPopup(false)}
-style={{
-padding:"6px 12px",
-background:"#f44336",
-color:"white",
-border:"none",
-cursor:"pointer"
-}}
->
-إغلاق
-</button>
-</div>
+            {/* Close button */}
+            <div style={{ marginTop: "10px", textAlign: "center" }}>
+              <button onClick={() => setShowTodayPopup(false)}>
+                إغلاق
+              </button>
+            </div>
 
-</div>
-)}
+          </div>
+        )}
 
-<hr style={{margin:"30px 0"}}/>
-      <hr style={{margin:"30px 0"}}/>
-<div style={{display:"flex",gap:"10px",marginBottom:"10px"}}>
+        <hr style={{ margin: "30px 0" }} />
+              <hr style={{ margin: "30px 0" }} />
+              <div style={{ display: "flex", gap: "10px", marginBottom: "10px" }}>
 
-<button
-onClick={()=>{
-if(rangeOffset>0){
-setRangeOffset(rangeOffset-1);
-}
-}}
-style={{
-padding:"6px 12px",
-opacity: rangeOffset===0 ? 0.4 : 1,
-cursor: rangeOffset===0 ? "not-allowed" : "pointer"
-}}
->
-السابق
-</button>
+                <button
+                  onClick={() => {
+                    if (rangeOffset > 0) {
+                      setRangeOffset(rangeOffset - 1);
+                    }
+                  }}
+                  style={{
+                    padding: "6px 12px",
+                    opacity: rangeOffset === 0 ? 0.4 : 1,
+                    cursor: rangeOffset === 0 ? "not-allowed" : "pointer"
+                  }}
+                >
+                  السابق
+                </button>
 
-<button
-onClick={()=>{
-if(rangeOffset < totalPages-1){
-setRangeOffset(rangeOffset+1);
-}
-}}
-style={{
-padding:"6px 12px",
-opacity: rangeOffset >= totalPages-1 ? 0.4 : 1,
-cursor: rangeOffset >= totalPages-1 ? "not-allowed" : "pointer"
-}}
->
-التالي
-</button>
+                <button
+                  onClick={() => {
+                    if (rangeOffset < totalPages - 1) {
+                      setRangeOffset(rangeOffset + 1);
+                    }
+                  }}
+                  style={{
+                    padding: "6px 12px",
+                    opacity: rangeOffset >= totalPages - 1 ? 0.4 : 1,
+                    cursor: rangeOffset >= totalPages - 1 ? "not-allowed" : "pointer"
+                  }}
+                >
+                  التالي
+                </button>
 
-<span style={{padding:"6px 12px"}}>
-الصفحة {rangeOffset+1}
-</span>
+                <span style={{ padding: "6px 12px" }}>
+                  الصفحة {rangeOffset + 1}
+                </span>
 
-</div>
-      <h2>المواعيد المؤكدة</h2>
-      <table style={{
-width:"100%",
-borderCollapse:"collapse",
-marginTop:"15px"
-}}>
+              </div>
+              <h2>المواعيد المؤكدة</h2>
+              <table style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                marginTop: "15px"
+              }}>
 
-<thead>
-<tr style={{
-background:"#4CAF50",
-color:"white"
-}}>
-<th style={{padding:"10px",width:"140px",textAlign:"center"}}>الوقت</th>
+                <thead>
+                  <tr style={{
+                    background: "#4CAF50",
+                    color: "white"
+                  }}>
+                    <th style={{ padding: "10px", width: "140px", textAlign: "center" }}>الوقت</th>
 
-<th style={{
-padding:"10px",
-textAlign:"center",
-width:"100%",
-letterSpacing:"2px",
-fontWeight:"bold"
-}}>
-────────────── الموعد ──────────────
-</th>
+                    <th style={{
+                      padding: "10px",
+                      textAlign: "center",
+                      width: "100%",
+                      letterSpacing: "2px",
+                      fontWeight: "bold"
+                    }}>
+                      ────────────── الموعد ──────────────
+                    </th>
 
-<th style={{padding:"10px",width:"70px",textAlign:"center"}}>
-الأولوية
-</th>
+                    <th style={{ padding: "10px", width: "70px", textAlign: "center" }}>
+                      الأولوية
+                    </th>
 
-<th style={{padding:"10px",width:"120px",textAlign:"left"}}>
-الإجراءات
-</th>
-</tr>
-</thead>
+                    <th style={{ padding: "10px", width: "120px", textAlign: "left" }}>
+                      الإجراءات
+                    </th>
+                  </tr>
+                </thead>
 
-<tbody>
+                <tbody>
 
-{pagedConfirmedKeys.map(key=>{
+                  {pagedConfirmedKeys.map(key => {
 
-const dayDate = confirmedGrouped[key][0].date;
+                    const dayDate = confirmedGrouped[key][0].date;
 
-return (
+                    return (
 
-<Fragment key={key}>
-<tr style={{
-background:"#e3f2fd",
-fontWeight:"bold"
-}}>
-<td colSpan={4} style={{padding:"8px"}}>
-{formatFullDateArabic(dayDate)}
-(عدد المواعيد: {confirmedGrouped[key].length})
-</td>
-</tr>
+                      <Fragment key={key}>
+                        <tr style={{
+                          background: "#e3f2fd",
+                          fontWeight: "bold"
+                        }}>
+                          <td colSpan={4} style={{ padding: "8px" }}>
+                            {formatFullDateArabic(dayDate)}
+                            (عدد المواعيد: {confirmedGrouped[key].length})
+                          </td>
+                        </tr>
 
-{confirmedGrouped[key].map(item=>(
-<tr key={item.id} style={{borderBottom:"1px solid #ddd"}}>
+                        {confirmedGrouped[key].map(item => (
+                          <tr key={item.id} style={{ borderBottom: "1px solid #ddd" }}>
 
-<td style={{
-padding:"8px",
-textAlign:"center",
-width:"140px"
-}}>
-{formatTimeArabic(item.date)}
-</td>
+                            <td style={{
+                              padding: "8px",
+                              textAlign: "center",
+                              width: "140px"
+                            }}>
+                              {formatTimeArabic(new Date(item.date))}
+                            </td>
 
-<td style={{
-padding:"8px",
-whiteSpace:"normal",
-wordBreak:"break-word",
-lineHeight:"1.4"
-}}>
-{item.title}
-</td>
+                            <td style={{
+                              padding: "8px",
+                              whiteSpace: "normal",
+                              wordBreak: "break-word",
+                              lineHeight: "1.4"
+                            }}>
+                              {item.title}
+                            </td>
 
-<td style={{
-padding:"8px",
-textAlign:"center",
-width:"70px"
-}}>
-<div style={{
-width:"10px",
-height:"10px",
-borderRadius:"50%",
-margin:"auto",
-background:getPriorityColor(item.priority)
-}}></div>
-</td>
+                            <td style={{
+                              padding: "8px",
+                              textAlign: "center",
+                              width: "70px"
+                            }}>
+                              <div style={{
+                                width: "10px",
+                                height: "10px",
+                                borderRadius: "50%",
+                                margin: "auto",
+                                background: getPriorityColor(item.priority)
+                              }}></div>
+                            </td>
 
-<td style={{
-padding:"8px",
-textAlign:"left",
-width:"120px"
-}}>
+                            <td style={{
+                              padding: "8px",
+                              textAlign: "left",
+                              width: "120px"
+                            }}>
 
-<div style={{
-display:"flex",
-alignItems:"center",
-gap:"14px"
-}}>
+                              <div style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "14px"
+                              }}>
 
+                                <ArrowUpDown
+                                  size={18}
+                                  style={{ cursor: "pointer" }}
+                                  onMouseEnter={(e) => e.currentTarget.style.color = "#ff9800"}
+                                  onMouseLeave={(e) => e.currentTarget.style.color = "black"}
+                                  onClick={() => {
+
+                                    Swal.fire({
+                                      title: "نقل الموعد",
+                                      text: "هل تريد نقل الموعد بنفس التوقيت أم تعديل الموعد؟",
+                                      icon: "question",
+
+                                      showCancelButton: true,
+                                      showCloseButton: true,
+
+                                      confirmButtonText: "نقل بنفس الموعد",
+                                      cancelButtonText: "تعديل الموعد",
+
+                                      confirmButtonColor: "#ff9800",
+                                      cancelButtonColor: "#2196F3",
+
+                                      customClass: {
+                                        closeButton: "swal-close-left"
+                                      }
+
+                                    }).then((result) => {
+
+                                      if (result.isConfirmed) {
+
+                                        moveToWaiting(item.id)
+
+                                      } else if (result.dismiss === Swal.DismissReason.cancel) {
+
+                                        handleEdit(item)
+                                        setStatus("waiting")
+
+                                      }
+
+                                    })
+
+                                  }}
+                                />
+
+                                <Pencil
+                                  size={18}
+                                  style={{ cursor: "pointer" }}
+                                  onMouseEnter={(e) => e.currentTarget.style.color = "#2196F3"}
+                                  onMouseLeave={(e) => e.currentTarget.style.color = "black"}
+                                  onClick={() => handleEdit(item)}
+                                />
+
+                                <Trash2
+                                  size={18}
+                                  style={{ cursor: "pointer" }}
+                                  onMouseEnter={(e) => e.currentTarget.style.color = "#f44336"}
+                                  onMouseLeave={(e) => e.currentTarget.style.color = "black"}
+                                  onClick={() => handleDelete(item.id)}
+                                />
+                                <div
+                                  style={{ position: "relative", cursor: "pointer" }}
+                                  onMouseEnter={(e) => e.currentTarget.style.color = "#607D8B"}
+                                  onMouseLeave={(e) => e.currentTarget.style.color = "black"}
+                                  onClick={() => moveToUnscheduled(item.id)}
+                                >
+
+                                  <Clock size={18} />
+
+                                  <span style={{
+                                    position: "absolute",
+                                    top: "-4px",
+                                    right: "-4px",
+                                    fontSize: "10px",
+                                    color: "red",
+                                    fontWeight: "bold"
+                                  }}>
+                                    ×
+                                  </span>
+
+                                </div>
+
+                              </div>
+
+                            </td>
+
+                          </tr>
+                        ))}
+
+                      </Fragment>
+                    )
+
+                  })}
+
+                </tbody>
+
+              </table>
+
+              <hr style={{ margin: "30px 0" }} />
+
+              <h2>قائمة الانتظار</h2>
+
+              <table style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                marginTop: "15px"
+              }}>
+
+     <thead>
+                  <tr style={{
+                    background: "#e4982d",
+                    color: "white"
+                  }}>
+                    <th style={{ padding: "10px", width: "140px", textAlign: "center" }}>الوقت</th>
+
+                    <th style={{
+                      padding: "10px",
+                      textAlign: "center",
+                      width: "100%",
+                      letterSpacing: "2px",
+                      fontWeight: "bold"
+                    }}>
+                      ────────────── الموعد ──────────────
+                    </th>
+
+                    <th style={{ padding: "10px", width: "70px", textAlign: "center" }}>
+                      الأولوية
+                    </th>
+
+                    <th style={{ padding: "10px", width: "120px", textAlign: "left" }}>
+                      الإجراءات
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody>
+
+                  {Object.keys(waitingGrouped).map(key => {
+
+                    const dayDate = new Date(waitingGrouped[key][0].date);
+
+                    return (
+
+                      <Fragment key={key}>
+
+                        <tr style={{
+                          background: "#e6cca1",
+                          fontWeight: "bold"
+                        }}>
+                          <td colSpan={4} style={{ padding: "8px" }}>
+                            {formatFullDateArabic(dayDate)}
+                            (عدد المواعيد: {waitingGrouped[key].length})
+                          </td>
+                        </tr>
+
+                        {waitingGrouped[key].map(item => {
+
+                          const d = new Date(item.date);
+
+                          return (
+                            <tr key={item.id} style={{ borderBottom: "1px solid #ddd" }}>
+
+                              <td style={{
+                                padding: "8px",
+                                textAlign: "center",
+                                width: "140px"
+                              }}>
+                                {formatTimeArabic(d)}
+                              </td>
+
+                              <td style={{
+                                padding: "8px",
+                                whiteSpace: "normal",
+                                wordBreak: "break-word",
+                                lineHeight: "1.4"
+                              }}>
+                                {item.title}
+                              </td>
+
+                              <td style={{
+                                padding: "8px",
+                                textAlign: "center",
+                                width: "70px"
+                              }}>
+                                <div style={{
+                                  width: "10px",
+                                  height: "10px",
+                                  borderRadius: "50%",
+                                  margin: "auto",
+                                  background: getPriorityColor(item.priority)
+                                }}></div>
+                              </td>
+
+                              <td style={{
+                                padding: "8px",
+                                textAlign: "left",
+                                width: "120px"
+                              }}>
+
+                                <div style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "14px"
+                                }}>
 <ArrowUpDown
-size={18}
-style={{cursor:"pointer"}}
-onMouseEnter={(e)=>e.currentTarget.style.color="#ff9800"}
-onMouseLeave={(e)=>e.currentTarget.style.color="black"}
-onClick={()=>{
+                                  size={18}
+                                  style={{ cursor: "pointer" }}
+                                  onMouseEnter={(e) => e.currentTarget.style.color = "#00ff73"}
+                                  onMouseLeave={(e) => e.currentTarget.style.color = "black"}
+                                  onClick={() => {
 
-Swal.fire({
-title:"نقل الموعد",
-text:"هل تريد نقل الموعد بنفس التوقيت أم تعديل الموعد؟",
-icon:"question",
+                                    Swal.fire({
+                                      title: "نقل الموعد",
+                                      text: "هل تريد نقل الموعد بنفس التوقيت أم تعديل الموعد؟",
+                                      icon: "question",
 
-showCancelButton:true,
-showCloseButton:true,
+                                      showCancelButton: true,
+                                      showCloseButton: true,
 
-confirmButtonText:"نقل بنفس الموعد",
-cancelButtonText:"تعديل الموعد",
+                                      confirmButtonText: "نقل بنفس الموعد",
+                                      cancelButtonText: "تعديل الموعد",
 
-confirmButtonColor:"#ff9800",
-cancelButtonColor:"#2196F3",
+                                      confirmButtonColor: "#0e8218",
+                                      cancelButtonColor: "#2196F3",
 
-customClass:{
-closeButton:"swal-close-left"
-}
+                                      customClass: {
+                                        closeButton: "swal-close-left"
+                                      }
 
-}).then((result)=>{
+                                    }).then((result) => {
 
-if(result.isConfirmed){
+                                      if (result.isConfirmed) {
 
-moveToWaiting(item.id)
+                                        moveToConfirmed(item.id)
 
-}else if(result.dismiss === Swal.DismissReason.cancel){
+                                      } else if (result.dismiss === Swal.DismissReason.cancel) {
 
-handleEdit(item)
-setStatus("waiting")
+                                        handleEdit(item)
+                                        setStatus("waiting")
 
-}
+                                      }
 
-})
+                                    })
 
-}}
-/>
+                                  }}
+                                />
 
-<Pencil
-size={18}
-style={{cursor:"pointer"}}
-onMouseEnter={(e)=>e.currentTarget.style.color="#2196F3"}
-onMouseLeave={(e)=>e.currentTarget.style.color="black"}
-onClick={()=>handleEdit(item)}
-/>
+                                <Pencil
+                                  size={18}
+                                  style={{ cursor: "pointer" }}
+                                  onMouseEnter={(e) => e.currentTarget.style.color = "#2196F3"}
+                                  onMouseLeave={(e) => e.currentTarget.style.color = "black"}
+                                  onClick={() => handleEdit(item)}
+                                />
 
-<Trash2
-size={18}
-style={{cursor:"pointer"}}
-onMouseEnter={(e)=>e.currentTarget.style.color="#f44336"}
-onMouseLeave={(e)=>e.currentTarget.style.color="black"}
-onClick={()=>handleDelete(item.id)}
-/>
-<div
-style={{position:"relative",cursor:"pointer"}}
-onMouseEnter={(e)=>e.currentTarget.style.color="#607D8B"}
-onMouseLeave={(e)=>e.currentTarget.style.color="black"}
-onClick={()=>moveToUnscheduled(item.id)}
->
+                                <Trash2
+                                  size={18}
+                                  style={{ cursor: "pointer" }}
+                                  onMouseEnter={(e) => e.currentTarget.style.color = "#f44336"}
+                                  onMouseLeave={(e) => e.currentTarget.style.color = "black"}
+                                  onClick={() => handleDelete(item.id)}
+                                />
+                                <div
+                                  style={{ position: "relative", cursor: "pointer" }}
+                                  onMouseEnter={(e) => e.currentTarget.style.color = "#607D8B"}
+                                  onMouseLeave={(e) => e.currentTarget.style.color = "black"}
+                                  onClick={() => moveToUnscheduled(item.id)}
+                                >
 
-<Clock size={18}/>
+                                  <Clock size={18} />
 
-<span style={{
-position:"absolute",
-top:"-4px",
-right:"-4px",
-fontSize:"10px",
-color:"red",
-fontWeight:"bold"
-}}>
-×
-</span>
+                                  <span style={{
+                                    position: "absolute",
+                                    top: "-4px",
+                                    right: "-4px",
+                                    fontSize: "10px",
+                                    color: "red",
+                                    fontWeight: "bold"
+                                  }}>
+                                    ×
+                                  </span>
+                                  </div>
 
-</div>
+                                </div>
 
-</div>
+                              </td>
 
-</td>
+                            </tr>
+                          );
+                        })}
 
-</tr>
-))}
+                      </Fragment>
+                    );
 
-</Fragment>
-)
+                  })}
 
+                </tbody>
+
+              </table>
+              <hr style={{ margin: "30px 0" }} />
+
+              <h2>بدون موعد</h2>
+
+              <table style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                marginTop: "15px"
+              }}>
+
+                <thead>
+                  <tr style={{
+                    background: "#607D8B",
+                    color: "white"
+                  }}>
+                    <th style={{ padding: "10px", textAlign: "center" }}>
+                      ────────────── الموعد ──────────────
+                    </th>
+
+                    <th style={{ padding: "10px", width: "70px", textAlign: "center" }}>
+                      الأولوية
+                    </th>
+
+                    <th style={{ padding: "10px", width: "120px", textAlign: "left" }}>
+                      الإجراءات
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody>
+
+                  {unscheduled.map(item => {
+  return (
+                    <tr key={item.id} style={{ borderBottom: "1px solid #ddd" }}>
+
+                      <td style={{
+                        padding: "8px",
+                        whiteSpace: "normal",
+                        wordBreak: "break-word",
+                        lineHeight: "1.4"
+                      }}>
+                        {item.title}
+                      </td>
+
+                      <td style={{ padding: "8px", textAlign: "center" }}>
+                        <div style={{
+                          width: "10px",
+                          height: "10px",
+                          borderRadius: "50%",
+                          margin: "auto",
+                          background: getPriorityColor(item.priority)
+                        }}></div>
+                      </td>
+
+                      <td style={{ padding: "8px" }}>
+
+                        <div style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "14px"
+                        }}>
+
+                          <Pencil
+                            size={18}
+                            style={{ cursor: "pointer" }}
+                            onMouseEnter={(e) => e.currentTarget.style.color = "#2196F3"}
+                            onMouseLeave={(e) => e.currentTarget.style.color = "black"}
+                            onClick={() => handleEdit(item)}
+                          />
+
+                          <Trash2
+                            size={18}
+                            style={{ cursor: "pointer" }}
+                            onMouseEnter={(e) => e.currentTarget.style.color = "#f44336"}
+                            onMouseLeave={(e) => e.currentTarget.style.color = "black"}
+                            onClick={() => handleDelete(item.id)}
+                          />
+
+                        </div>
+
+                      </td>
+
+                    </tr>
+                    );
 })}
 
-</tbody>
+                </tbody>
 
-</table>
-
-
-      <hr style={{margin:"30px 0"}}/>
-
-     <h2>قائمة الانتظار</h2>
-
-<table style={{
-width:"100%",
-borderCollapse:"collapse",
-marginTop:"15px"
-}}>
-
-<thead>
-<tr style={{
-background:"#ff9800",
-color:"white"
-}}>
-<th style={{padding:"10px",width:"140px",textAlign:"center"}}>الوقت</th>
-
-<th style={{
-padding:"10px",
-textAlign:"center",
-width:"100%",
-letterSpacing:"2px",
-fontWeight:"bold"
-}}>
-────────────── الموعد ──────────────
-</th>
-
-<th style={{padding:"10px",width:"70px",textAlign:"center"}}>
-الأولوية
-</th>
-
-<th style={{padding:"10px",width:"120px",textAlign:"left"}}>
-الإجراءات
-</th>
-</tr>
-</thead>
-
-<tbody>
-
-{Object.keys(waitingGrouped).map(key=>{
-
-const dayDate = waitingGrouped[key][0].date;
-
-return (
-
-<Fragment key={key}>
-
-<tr style={{
-background:"#fff3cd",
-fontWeight:"bold"
-}}>
-<td colSpan={4} style={{padding:"8px"}}>
-{formatFullDateArabic(dayDate)}
-(عدد المواعيد: {waitingGrouped[key].length})
-</td>
-</tr>
-
-{waitingGrouped[key].map(item=>(
-<tr key={item.id} style={{borderBottom:"1px solid #ddd"}}>
-
-<td style={{
-padding:"8px",
-textAlign:"center",
-width:"140px"
-}}>
-{formatTimeArabic(item.date)}
-</td>
-
-<td style={{
-padding:"8px",
-whiteSpace:"normal",
-wordBreak:"break-word",
-lineHeight:"1.4"
-}}>
-{item.title}
-</td>
-
-<td style={{
-padding:"8px",
-textAlign:"center",
-width:"70px"
-}}>
-<div style={{
-width:"10px",
-height:"10px",
-borderRadius:"50%",
-margin:"auto",
-background:getPriorityColor(item.priority)
-}}></div>
-</td>
-
-<td style={{
-padding:"8px",
-textAlign:"left",
-width:"120px"
-}}>
-
-<div style={{
-display:"flex",
-alignItems:"center",
-gap:"14px"
-}}>
-
-<ArrowUpDown
-size={18}
-style={{cursor:"pointer"}}
-onMouseEnter={(e)=>e.currentTarget.style.color="#4CAF50"}
-onMouseLeave={(e)=>e.currentTarget.style.color="black"}
-onClick={()=>setConfirmDialog(item)}
-/>
-
-<Pencil
-size={18}
-style={{cursor:"pointer"}}
-onMouseEnter={(e)=>e.currentTarget.style.color="#2196F3"}
-onMouseLeave={(e)=>e.currentTarget.style.color="black"}
-onClick={()=>handleEdit(item)}
-/>
-
-<Trash2
-size={18}
-style={{cursor:"pointer"}}
-onMouseEnter={(e)=>e.currentTarget.style.color="#f44336"}
-onMouseLeave={(e)=>e.currentTarget.style.color="black"}
-onClick={()=>handleDelete(item.id)}
-/>
-
-<div
-style={{position:"relative",cursor:"pointer"}}
-onMouseEnter={(e)=>e.currentTarget.style.color="#607D8B"}
-onMouseLeave={(e)=>e.currentTarget.style.color="black"}
-onClick={()=>moveToUnscheduled(item.id)}
->
-
-<Clock size={18}/>
-
-<span style={{
-position:"absolute",
-top:"-4px",
-right:"-4px",
-fontSize:"10px",
-color:"red",
-fontWeight:"bold"
-}}>
-×
-</span>
-
-</div>
-</div>
-
-
-</td>
-
-</tr>
-))}
-
-</Fragment>
-
-)
-
-})}
-
-</tbody>
-
-</table>
-<hr style={{margin:"30px 0"}}/>
-
-<h2>بدون موعد</h2>
-
-<table style={{
-width:"100%",
-borderCollapse:"collapse",
-marginTop:"15px"
-}}>
-
-<thead>
-<tr style={{
-background:"#607D8B",
-color:"white"
-}}>
-<th style={{padding:"10px",textAlign:"center"}}>
-────────────── الموعد ──────────────
-</th>
-
-<th style={{padding:"10px",width:"70px",textAlign:"center"}}>
-الأولوية
-</th>
-
-<th style={{padding:"10px",width:"120px",textAlign:"left"}}>
-الإجراءات
-</th>
-</tr>
-</thead>
-
-<tbody>
-
-{unscheduled.map(item=>(
-<tr key={item.id} style={{borderBottom:"1px solid #ddd"}}>
-
-<td style={{
-padding:"8px",
-whiteSpace:"normal",
-wordBreak:"break-word",
-lineHeight:"1.4"
-}}>
-{item.title}
-</td>
-
-<td style={{padding:"8px",textAlign:"center"}}>
-<div style={{
-width:"10px",
-height:"10px",
-borderRadius:"50%",
-margin:"auto",
-background:getPriorityColor(item.priority)
-}}></div>
-</td>
-
-<td style={{padding:"8px"}}>
-
-<div style={{
-display:"flex",
-alignItems:"center",
-gap:"14px"
-}}>
-
-<Pencil
-size={18}
-style={{cursor:"pointer"}}
-onMouseEnter={(e)=>e.currentTarget.style.color="#2196F3"}
-onMouseLeave={(e)=>e.currentTarget.style.color="black"}
-onClick={()=>handleEdit(item)}
-/>
-
-<Trash2
-size={18}
-style={{cursor:"pointer"}}
-onMouseEnter={(e)=>e.currentTarget.style.color="#f44336"}
-onMouseLeave={(e)=>e.currentTarget.style.color="black"}
-onClick={()=>handleDelete(item.id)}
-/>
-
-</div>
-
-</td>
-
-</tr>
-))}
-
-</tbody>
-
-</table>
-
+              </table>
+            
     </main>
-  );
+    );
 }
 
